@@ -208,7 +208,18 @@ def learn_image(size=128, hidden=(128, 128, 128), steps=12000, seed=0, frames=7,
                  f"final loss {losses[-1]:.4f}", fontsize=12)
     plt.show()
 
-    loss_curve(losses, snaps)                         # the same run, as a number
+    global LAST_RUN                                   # so loss_chart() can draw the
+    LAST_RUN = (losses, snaps)                        # same run without retraining
+
+
+LAST_RUN = None                                       # (losses, snaps) of the last fit
+
+
+def loss_chart(window=50):
+    """The run above, as a number. Uses the last training run -- no retraining."""
+    if LAST_RUN is None:
+        raise RuntimeError("run learn_image() first")
+    loss_curve(*LAST_RUN, window=window)
     plt.show()
 
 
