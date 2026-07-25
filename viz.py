@@ -350,6 +350,79 @@ def show_sweep(runs, window=200):
     plt.show()
 
 
+def uniform_width(depth, budget):
+    """The uniform hidden width whose parameter count lands closest to budget."""
+    return min(range(2, 4000), key=lambda w: abs(n_params([2, *([w] * depth), 1]) - budget))
+
+
+def budget_sweep(depths=range(1, 11), budget=None, steps=10_000, size=128, seed=0,
+                 controls=((2, 2, 2, 2043),), verbose=True):
+    """Fixed parameter budget, every shape. Depth is the only real variable.
+
+    budget defaults to HALF the pixel count, so every network must compress 2:1.
+    Width is chosen per depth to spend the same budget, which means deep
+    networks are narrow and shallow ones are very wide.
+
+    controls : extra shapes on the same budget, deliberately pathological, to
+               show that the count is not what matters.
+    """
+    import time
+
+    img = ship(size)
+    X, y = pixels(img)
+    budget = size * size // 2 if budget is None else budget
+
+    shapes = [(f"{d}x{uniform_width(d, budget)}", (uniform_width(d, budget),) * d)
+              for d in depths]
+    shapes += [("bottleneck " + "-".join(map(str, c)), tuple(c)) for c in controls]
+
+    runs = {}
+    for name, hidden in shapes:
+        p = n_params([2, *hidden, 1])
+        t0 = time.time()
+        _, losses = fit(X, y, hidden, steps, snaps=(0,), seed=seed)
+        runs[name] = (np.array(losses), p, len(hidden))
+        if verbose:
+            print(f"{name:<22} {p:>7,} params ({p/budget:.3f} of budget)  "
+                  f"final {np.mean(losses[-500:]):.5f}  ({time.time()-t0:.0f}s)", flush=True)
+    return runs
+
+
+def show_budget(runs, window=200):
+    """Loss curves and the final loss against depth, at one fixed budget."""
+    main = {k: v for k, v in runs.items() if not k.startswith("bottleneck")}
+    ctrl = {k: v for k, v in runs.items() if k.startswith("bottleneck")}
+    shades = plt.cm.plasma(np.linspace(.05, .8, len(main)))
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.6))
+
+    for colour, (name, (losses, p, d)) in zip(shades, main.items()):
+        s = np.convolve(losses, np.ones(window) / window, "valid")
+        axes[0].plot(np.arange(len(s)) + window, s, color=colour, lw=1.8, label=name)
+    for name, (losses, p, d) in ctrl.items():
+        s = np.convolve(losses, np.ones(window) / window, "valid")
+        axes[0].plot(np.arange(len(s)) + window, s, color="#c1440e", lw=1.8, ls="--",
+                     label=name)
+    axes[0].set(xscale="log", yscale="log", xlabel="step", ylabel="mean squared error",
+                title="same parameter budget, different shape")
+    axes[0].grid(alpha=.2, which="both"); axes[0].legend(fontsize=7.5, ncol=2)
+
+    d = [v[2] for v in main.values()]
+    f = [np.mean(v[0][-500:]) for v in main.values()]
+    axes[1].plot(d, f, "o-", color="#1f4e8c", lw=2)
+    for name, (losses, p, dd) in ctrl.items():
+        axes[1].plot(dd, np.mean(losses[-500:]), "X", color="#c1440e", ms=13)
+        axes[1].annotate("bottleneck ", (dd, np.mean(losses[-500:])), color="#c1440e",
+                         fontsize=10, va="center", ha="right")   # label inward, never clipped
+    best = int(np.argmin(f))
+    axes[1].annotate(f" best: {list(main)[best]}", (d[best], f[best]), fontsize=10,
+                     color="#1f4e8c", va="top")
+    axes[1].set(yscale="log", xlabel="hidden layers", ylabel="final loss",
+                xticks=d, title="deeper is better, until it isn't")
+    axes[1].grid(alpha=.25, which="both")
+    plt.show()
+
+
 LAST_RUN = None                                       # (losses, snaps) of the last fit
 
 
