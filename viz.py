@@ -3,6 +3,8 @@
 Nothing here is clever. If a figure surprises you, the answer is in this file.
 """
 
+from pathlib import Path
+
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -25,6 +27,118 @@ def perceptron(x, w, b):
 
 
 INK, ACCENT, GREY = "#1f4e8c", "#c1440e", "#999"
+
+
+# ---------------------------------------------------------------- datasets
+# Thousands of points, two dimensions, difficulty on a dial. Made here rather
+# than downloaded, so every property of the data is something you chose.
+
+def blobs(n=4000, noise=.35, seed=0):
+    """Two gaussian clouds. A straight line is enough."""
+    rng = np.random.default_rng(seed)
+    y = rng.integers(0, 2, n)
+    centres = np.array([[-1., -.6], [1., .6]])
+    X = centres[y] + rng.normal(0, noise, (n, 2))
+    return X, y
+
+
+def moons(n=4000, noise=.18, seed=0):
+    """Two interlocking crescents. No line works; a bent boundary does."""
+    rng = np.random.default_rng(seed)
+    y = rng.integers(0, 2, n)
+    t = rng.uniform(0, np.pi, n)
+    X = np.stack([np.cos(t), np.sin(t)], 1)
+    X[y == 1] = np.stack([1 - np.cos(t), .5 - np.sin(t)], 1)[y == 1]
+    return X + rng.normal(0, noise, (n, 2)), y
+
+
+def circles(n=4000, noise=.12, gap=.55, seed=0):
+    """One class ringed by the other. Needs a closed boundary."""
+    rng = np.random.default_rng(seed)
+    y = rng.integers(0, 2, n)
+    r = np.where(y == 1, 1.0, gap) + rng.normal(0, noise, n)
+    t = rng.uniform(0, 2 * np.pi, n)
+    return np.stack([r * np.cos(t), r * np.sin(t)], 1), y
+
+
+def spirals(n=4000, turns=1.25, noise=.035, seed=0):
+    """Two arms wound together. The hard one -- the boundary is long and curved.
+
+    Both arms share a radius schedule; class 1 is the same arm rotated half a
+    turn. Noise has to stay well under the gap between arms or they smear.
+    """
+    rng = np.random.default_rng(seed)
+    y = rng.integers(0, 2, n)
+    u = rng.uniform(.06, 1, n)                        # skip the centre, where arms meet
+    r = np.sqrt(u)
+    t = r * turns * 2 * np.pi + np.where(y == 1, np.pi, 0.)
+    X = np.stack([r * np.cos(t), r * np.sin(t)], 1)
+    return X + rng.normal(0, noise, (n, 2)), y
+
+
+def ship(size=128):
+    """The clipper, grayscale, square, brightness in [0, 1].
+
+    'Extreme Clipper Donald McKay', W. J., 1856. Public domain.
+    Engraving, so it is full of rigging and hatching -- fine detail on purpose.
+    """
+    from PIL import Image
+
+    im = Image.open(Path(__file__).parent / "ship.jpg").convert("L")
+    w, h = im.size
+    s = min(w, h)                                     # centre crop, so nothing is squashed
+    im = im.crop(((w - s) // 2, (h - s) // 2, (w - s) // 2 + s, (h - s) // 2 + s))
+    return np.asarray(im.resize((size, size), Image.LANCZOS), dtype=np.float64) / 255.0
+
+
+def pixels(img):
+    """Turn an image into a training set: (x, y) coordinate -> brightness.
+
+    Coordinates are scaled to [-1, 1]; brightness stays in [0, 1].
+    A 128x128 image is 16,384 examples in 2 input dimensions.
+    """
+    n = img.shape[0]
+    g = np.linspace(-1, 1, n)
+    yy, xx = np.meshgrid(g, g, indexing="ij")         # row = y, column = x
+    X = np.stack([xx.ravel(), yy.ravel()], 1)
+    return X, img.ravel()
+
+
+def show_image(img, ax=None, title=""):
+    """Brightness as a picture. The whole point of this experiment."""
+    if ax is None:
+        _, ax = plt.subplots(figsize=(4, 4))
+    ax.imshow(img, cmap="gray", vmin=0, vmax=1, interpolation="nearest")
+    ax.set(title=title, xticks=[], yticks=[])
+    return ax
+
+
+def target(size=128):
+    """What the network has to reproduce, from nothing but (x, y)."""
+    img = ship(size)
+    X, v = pixels(img)
+    show_image(img, title=f"{size}x{size}   {len(X):,} pixels   2 inputs -> 1 output")
+    plt.show()
+
+
+def scatter(X, y, ax=None, title="", s=6):
+    """Every dataset in this book is 2D, so it can always just be drawn."""
+    if ax is None:
+        _, ax = plt.subplots(figsize=(4.2, 4.2))
+    for cls, colour in [(0, "#7aa6d8"), (1, "#c1440e")]:
+        ax.scatter(*X[y == cls].T, s=s, color=colour, alpha=.65, linewidths=0)
+    ax.set(title=title, xticks=[], yticks=[])
+    ax.set_aspect("equal")
+    return ax
+
+
+def datasets(n=4000):
+    """The four shapes, easiest to hardest."""
+    made = [(f.__name__, *f(n)) for f in (blobs, moons, circles, spirals)]
+    _, axes = plt.subplots(1, 4, figsize=(15, 4))
+    for ax, (name, X, y) in zip(axes, made):
+        scatter(X, y, ax=ax, title=f"{name}   n={len(X):,}")
+    plt.show()
 
 
 def _node(ax, xy, label, grey=False):
