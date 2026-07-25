@@ -115,11 +115,18 @@ def trace(want=AND, w=(-0.8, 0.6), b=0.9, lr=0.2, max_epochs=12):
     return frames
 
 
-def video(want=AND, name="AND", fps=1.6, **kw):
-    """The line moving, one correction at a time."""
+def video(want=AND, name="AND", fps=1.5, dpi=90, hold=5, **kw):
+    """The line moving, one correction at a time. Loops forever."""
+    import base64
+    import os
+    import tempfile
+
     from matplotlib import animation
+    from matplotlib.animation import PillowWriter
+    from IPython.display import HTML
 
     frames = trace(want, **kw)
+    frames += [frames[-1]] * hold                     # linger on the answer before looping
     fig, ax = plt.subplots(figsize=(5.2, 5.4))
     plt.close(fig)                                    # don't also emit a static copy
 
@@ -142,10 +149,14 @@ def video(want=AND, name="AND", fps=1.6, **kw):
 
         ax.set_xlabel(f"w = [{f['w'][0]:+.1f}, {f['w'][1]:+.1f}]   b = {f['b']:+.1f}")
 
-    from IPython.display import HTML
-
     anim = animation.FuncAnimation(fig, draw, frames=len(frames), interval=1000 / fps)
-    return HTML(anim.to_html5_video(embed_limit=64))   # renders as a <video> with controls
+
+    with tempfile.TemporaryDirectory() as d:                # PillowWriter needs a real path
+        path = os.path.join(d, "anim.gif")
+        anim.save(path, writer=PillowWriter(fps=fps), dpi=dpi)   # GIF loops on its own
+        src = base64.b64encode(open(path, "rb").read()).decode()
+
+    return HTML(f'<img src="data:image/gif;base64,{src}">')
 
 
 def learn(want=AND, name="AND", **kw):
