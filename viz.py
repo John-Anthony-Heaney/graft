@@ -281,28 +281,34 @@ def n_params(sizes):
     return sum(a * b + b for a, b in zip(sizes, sizes[1:]))
 
 
-def arch_sweep(depths=(1, 2, 3, 4, 5), widths=(32, 64, 128, 256), steps=10_000,
-               size=128, seed=0, verbose=True):
+def arch_sweep(depths=(1, 2, 3, 4, 5), widths=(16, 24, 32, 48), steps=10_000,
+               size=128, seed=0, verbose=True, max_params=None):
     """Every depth x width combination, same data, same steps, same seed.
 
     Returns {(depth, width): losses}. Only the input SHAPE of the network
     changes -- everything else is held fixed, so differences are the network's.
+
+    max_params : refuse any network with more parameters than this. Defaults to
+                 the pixel count, so no network can simply store the image.
     """
     import time
 
     img = ship(size)
     X, y = pixels(img)
+    budget = size * size if max_params is None else max_params
     runs = {}
 
     for width in widths:
         for depth in depths:
             hidden = (width,) * depth
+            p = n_params([2, *hidden, 1])
+            if p > budget:                            # never more parameters than pixels
+                raise ValueError(f"{depth}x{width} needs {p:,} params > budget {budget:,}")
             t0 = time.time()
             _, losses = fit(X, y, hidden, steps, snaps=(0,), seed=seed)
             runs[(depth, width)] = np.array(losses)
             if verbose:
-                p = n_params([2, *hidden, 1])
-                print(f"{depth}x{width:<4} {p:>8,} params  "
+                print(f"{depth}x{width:<4} {p:>7,} params  {p / (size * size):>5.2f}/pixel  "
                       f"final {np.mean(losses[-500:]):.5f}  ({time.time() - t0:.0f}s)",
                       flush=True)
 
