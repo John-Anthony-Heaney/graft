@@ -207,7 +207,28 @@ def learn_image(size=128, hidden=(128, 128, 128), steps=12000, seed=0, frames=7,
     fig.suptitle(f"{'-'.join(str(h) for h in (2, *hidden, 1))}   "
                  f"final loss {losses[-1]:.4f}", fontsize=12)
     plt.show()
-    return losses
+
+    loss_curve(losses, snaps)                         # the same run, as a number
+    plt.show()
+
+
+def loss_curve(losses, snaps=(), window=50, ax=None):
+    """The same run as a number. Log scale, because the fall spans decades."""
+    if ax is None:
+        _, ax = plt.subplots(figsize=(7.5, 4))
+
+    smooth = np.convolve(losses, np.ones(window) / window, mode="valid")
+    ax.plot(losses, color="#c9d8ec", lw=.8)           # raw: one minibatch, noisy
+    ax.plot(np.arange(len(smooth)) + window - 1, smooth, color=INK, lw=2)
+
+    for t in snaps:                                   # where the pictures were taken
+        if 0 < t < len(losses):
+            ax.axvline(t, color=GREY, lw=.8, ls=":")
+
+    ax.set(xscale="log", yscale="log", xlabel="step", ylabel="mean squared error",
+           title="loss")
+    ax.grid(alpha=.25, which="both")
+    return ax
 
 
 def scatter(X, y, ax=None, title="", s=6):
