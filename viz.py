@@ -121,6 +121,95 @@ def target(size=128):
     plt.show()
 
 
+# ------------------------------------------------- a network, written out longhand
+# Nothing imported. Forward pass, backward pass and the optimiser are all here.
+
+def init(sizes, seed=0):
+    """One (W, b) per layer. Scale by 1/sqrt(fan_in) or the signal explodes."""
+    rng = np.random.default_rng(seed)
+    return [[rng.normal(0, np.sqrt(1 / a), (a, b)), np.zeros(b)]
+            for a, b in zip(sizes, sizes[1:])]
+
+
+def predict(params, X):
+    """Forward pass. tanh everywhere, sigmoid at the end to land in [0, 1]."""
+    a = X
+    for W, b in params[:-1]:
+        a = np.tanh(a @ W + b)
+    W, b = params[-1]
+    return 1 / (1 + np.exp(-(a @ W + b)))
+
+
+def grads(params, X, y):
+    """Forward, keeping every activation, then walk the chain rule backwards."""
+    acts = [X]                                        # what each layer handed on
+    a = X
+    for W, b in params[:-1]:
+        a = np.tanh(a @ W + b)
+        acts.append(a)
+    W, b = params[-1]
+    out = 1 / (1 + np.exp(-(a @ W + b)))
+
+    n = len(X)
+    d = (out - y[:, None]) * out * (1 - out) * (2 / n)   # dLoss/dz at the output
+    g = [None] * len(params)
+
+    for i in range(len(params) - 1, -1, -1):
+        prev = acts[i]
+        g[i] = [prev.T @ d, d.sum(0)]                 # this layer's share of the blame
+        if i:                                         # pass it back through tanh
+            d = (d @ params[i][0].T) * (1 - prev ** 2)
+
+    return g, float(np.mean((out - y[:, None]) ** 2))
+
+
+def fit(X, y, hidden=(64, 64, 64), steps=3000, batch=1024, lr=3e-3,
+        snaps=(0, 20, 100, 400, 1200, 3000), seed=0):
+    """Train, and keep a copy of the weights at each snapshot step."""
+    params = init([X.shape[1], *hidden, 1], seed)
+    m = [[np.zeros_like(w) for w in layer] for layer in params]   # Adam state
+    v = [[np.zeros_like(w) for w in layer] for layer in params]
+    rng = np.random.default_rng(seed)
+
+    kept, losses = [], []
+    for t in range(max(snaps) + 1):
+        if t in snaps:
+            kept.append((t, [[w.copy() for w in layer] for layer in params]))
+
+        idx = rng.integers(0, len(X), batch)
+        g, mse = grads(params, X[idx], y[idx])
+        losses.append(mse)
+
+        for i, layer in enumerate(params):             # Adam, by hand
+            for j in range(2):
+                m[i][j] = .9 * m[i][j] + .1 * g[i][j]
+                v[i][j] = .999 * v[i][j] + .001 * g[i][j] ** 2
+                mh = m[i][j] / (1 - .9 ** (t + 1))
+                vh = v[i][j] / (1 - .999 ** (t + 1))
+                layer[j] -= lr * mh / (np.sqrt(vh) + 1e-8)
+
+    return kept, losses
+
+
+def learn_image(size=128, hidden=(128, 128, 128), steps=12000, seed=0, frames=7, **kw):
+    """Watch the picture appear: the network's whole output, as it trains."""
+    img = ship(size)
+    X, y = pixels(img)
+    # log spacing: the early steps change the most, so look there most often
+    snaps = tuple(sorted({0, *np.unique(np.geomspace(20, steps, frames - 1).astype(int))}))
+    kept, losses = fit(X, y, hidden, steps, snaps=snaps, seed=seed, **kw)
+
+    fig, axes = plt.subplots(1, len(kept) + 1, figsize=(2.5 * (len(kept) + 1), 3.1))
+    for ax, (t, params) in zip(axes, kept):
+        out = predict(params, X).reshape(size, size)
+        show_image(out, ax=ax, title=f"step {t:,}")
+    show_image(img, ax=axes[-1], title="target")
+    fig.suptitle(f"{'-'.join(str(h) for h in (2, *hidden, 1))}   "
+                 f"final loss {losses[-1]:.4f}", fontsize=12)
+    plt.show()
+    return losses
+
+
 def scatter(X, y, ax=None, title="", s=6):
     """Every dataset in this book is 2D, so it can always just be drawn."""
     if ax is None:
