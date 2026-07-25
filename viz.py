@@ -24,48 +24,94 @@ def perceptron(x, w, b):
     return step(z)
 
 
+INK, ACCENT, GREY = "#1f4e8c", "#c1440e", "#999"
+
+
+def _node(ax, xy, label, grey=False):
+    """An input: a circle holding a value."""
+    from matplotlib.patches import Circle
+
+    ax.add_patch(Circle(xy, .42, fc="#f2f2f2" if grey else "white",
+                        ec=GREY if grey else INK, lw=2, zorder=3))
+    ax.text(*xy, label, ha="center", va="center", fontsize=13, zorder=4,
+            color="#666" if grey else "black")
+
+
+def _neuron(ax, xy, caption=None, w=2.2, h=1.9):
+    """The neuron itself: a sum on the left, a threshold on the right."""
+    from matplotlib.patches import FancyBboxPatch
+
+    cx, cy = xy
+    ax.add_patch(FancyBboxPatch((cx - w / 2, cy - h / 2), w, h,
+                                boxstyle="round,pad=.06", fc="#e8eef7", ec=INK, lw=2))
+    ax.plot([cx, cx], [cy - h / 2 + .1, cy + h / 2 - .1], color=INK, lw=1.2, ls=":")
+    ax.text(cx - w / 4, cy, r"$\sum$", ha="center", va="center", fontsize=24)
+
+    sx = np.linspace(-1, 1, 200)                      # the step, drawn to scale
+    ax.plot(cx + w / 4 + sx * .34, cy - .42 + (sx > 0) * .84, color=ACCENT, lw=2.2)
+    if caption:
+        ax.text(cx, cy - h / 2 - .38, caption, ha="center", fontsize=12, color=INK)
+
+
+def _wire(ax, start, end, label=None, grey=False, t=.58, dy=.2):
+    """One weighted connection, labelled along its own length."""
+    from matplotlib.patches import FancyArrowPatch
+
+    ax.add_patch(FancyArrowPatch(start, end, arrowstyle="-|>", mutation_scale=16,
+                                 color=GREY if grey else INK, lw=1.8))
+    if label:
+        ax.text(start[0] + t * (end[0] - start[0]),
+                start[1] + t * (end[1] - start[1]) + dy,
+                label, fontsize=13, color=ACCENT, ha="center", va="bottom")
+
+
 def diagram(labels=("$x_1$", "$x_2$"), weights=("$w_1$", "$w_2$")):
     """The anatomy of one neuron: inputs in, weighted sum, threshold, out."""
-    from matplotlib.patches import Circle, FancyArrowPatch, FancyBboxPatch
-
     fig, ax = plt.subplots(figsize=(8.5, 4))
     ax.set(xlim=(0, 10), ylim=(0, 5)); ax.axis("off")
 
-    ink, accent = "#1f4e8c", "#c1440e"
     ys = [3.6, 2.0]                                   # one row per input
     body = (5.0, 2.8)                                 # where the neuron sits
 
-    for y, lab in zip(ys, labels):                    # the inputs
-        ax.add_patch(Circle((1.2, y), .42, fc="white", ec=ink, lw=2, zorder=3))
-        ax.text(1.2, y, lab, ha="center", va="center", fontsize=13, zorder=4)
+    for y, lab in zip(ys, labels):
+        _node(ax, (1.2, y), lab)
+    _node(ax, (1.2, .6), "1", grey=True)              # the bias is just an always-on input
 
-    ax.add_patch(Circle((1.2, .6), .42, fc="#f2f2f2", ec="#999", lw=2, zorder=3))
-    ax.text(1.2, .6, "1", ha="center", va="center", fontsize=13, color="#666", zorder=4)
-
-    # every input reaches the neuron, carrying its weight
-    arrive = [body[1] + .5, body[1], body[1] - .5]    # distinct landing points, so nothing overlaps
+    arrive = [body[1] + .5, body[1], body[1] - .5]    # distinct landing points, nothing overlaps
     for y, wl, ay in zip(ys + [.6], list(weights) + ["$b$"], arrive):
-        ax.add_patch(FancyArrowPatch((1.68, y), (body[0] - 1.15, ay),
-                                     arrowstyle="-|>", mutation_scale=16,
-                                     color=ink if y in ys else "#999", lw=1.8))
-        t = .58                                       # label sits along its own arrow
-        ax.text(1.68 + t * (body[0] - 1.15 - 1.68), y + t * (ay - y) + .2, wl,
-                fontsize=13, color=accent, ha="center", va="bottom")
+        _wire(ax, (1.68, y), (body[0] - 1.15, ay), wl, grey=(y == .6))
 
-    ax.add_patch(FancyBboxPatch((body[0] - 1.1, body[1] - .95), 2.2, 1.9,
-                                boxstyle="round,pad=.06", fc="#e8eef7", ec=ink, lw=2))
-    ax.plot([body[0] - .02, body[0] - .02], [body[1] - .85, body[1] + .85],
-            color=ink, lw=1.2, ls=":")                # sum | threshold
-    ax.text(body[0] - .55, body[1], r"$\sum$", ha="center", va="center", fontsize=26)
-
-    sx = np.linspace(-1, 1, 200)                      # the step, drawn to scale
-    ax.plot(body[0] + .55 + sx * .38, body[1] - .45 + (sx > 0) * .9, color=accent, lw=2.2)
-
-    ax.add_patch(FancyArrowPatch((body[0] + 1.15, body[1]), (8.6, body[1]),
-                                 arrowstyle="-|>", mutation_scale=16, color=ink, lw=1.8))
+    _neuron(ax, body, r"$z = w_1x_1 + w_2x_2 + b$")
+    _wire(ax, (body[0] + 1.15, body[1]), (8.6, body[1]))
     ax.text(9.1, body[1], "$y$", fontsize=15, ha="center", va="center")
-    ax.text(body[0], body[1] - 1.35, r"$z = w_1x_1 + w_2x_2 + b$",
-            ha="center", fontsize=12, color=ink)
+    plt.show()
+
+
+def mlp_diagram():
+    """Two layers, one neuron each. The first neuron's output IS the second's input."""
+    fig, ax = plt.subplots(figsize=(11.5, 4.2))
+    ax.set(xlim=(0, 13.4), ylim=(0, 5)); ax.axis("off")
+
+    ys = [3.6, 2.0]
+    h1, h2 = (4.6, 2.8), (9.4, 2.8)                   # layer 1, layer 2
+
+    for y, lab in zip(ys, ("$x_1$", "$x_2$")):
+        _node(ax, (1.1, y), lab)
+    _node(ax, (1.1, .6), "1", grey=True)
+    _node(ax, (7.0, .6), "1", grey=True)
+
+    arrive = [h1[1] + .5, h1[1], h1[1] - .5]
+    for y, wl, ay in zip(ys + [.6], ["$w_1$", "$w_2$", "$b^{(1)}$"], arrive):
+        _wire(ax, (1.58, y), (h1[0] - 1.15, ay), wl, grey=(y == .6))
+
+    _neuron(ax, h1, "layer 1")
+    _wire(ax, (h1[0] + 1.15, h1[1]), (h2[0] - 1.15, h2[1]), "$v$")   # the only new wire
+    ax.text(h1[0] + 1.5, h1[1] - .45, "$h$", fontsize=14, ha="center", color=INK)
+    _wire(ax, (7.0, 1.05), (h2[0] - 1.15, h2[1] - .5), "$b^{(2)}$", grey=True)
+
+    _neuron(ax, h2, "layer 2")
+    _wire(ax, (h2[0] + 1.15, h2[1]), (12.2, h2[1]))
+    ax.text(12.7, h2[1], "$y$", fontsize=15, ha="center", va="center")
     plt.show()
 
 
