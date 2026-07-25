@@ -184,6 +184,35 @@ def learn(want=AND, name="AND", every=2, **kw):
     plt.show()
 
 
+def no_line(want=XOR, n=41):
+    """Search every line. Show the best each corner-failure can manage.
+
+    Brute force over a grid of (w1, w2, b): for each corner, find the best
+    line among those that get that corner wrong. Nothing reaches 4 of 4.
+    """
+    grid = np.linspace(-2, 2, n)
+    best_score = 0
+    champion = {}                                     # failed corner -> (score, w, b)
+
+    for w1 in grid:
+        for w2 in grid:
+            for b in grid:
+                got = [perceptron(x, [w1, w2], b) for x in CORNERS]
+                score = sum(g == t for g, t in zip(got, want))
+                best_score = max(best_score, score)
+                for i, (g, t) in enumerate(zip(got, want)):
+                    if g != t and score > champion.get(i, (0,))[0]:
+                        champion[i] = (score, [w1, w2], b)
+
+    _, axes = plt.subplots(1, len(champion), figsize=(3.1 * len(champion), 3.8))
+    for ax, (i, (score, w, b)) in zip(np.atleast_1d(axes), sorted(champion.items())):
+        show(w, b, want=want, ax=ax, title=f"{score} of 4 — misses {CORNERS[i]}")
+
+    plt.suptitle(f"every line, four ways of trying.  best possible: {best_score} of 4",
+                 fontsize=13, weight="bold")
+    plt.show()
+
+
 def logic_panel():
     """AND, OR, XOR. Same weights; only the bias moves."""
     _, axes = plt.subplots(1, 3, figsize=(12, 4))
