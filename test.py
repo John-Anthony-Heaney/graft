@@ -9,7 +9,7 @@ import json
 import sys
 from pathlib import Path
 
-NB = Path(__file__).parent / "DeepLearning.ipynb"
+NB = Path(__file__).parent / "Book.ipynb"
 
 
 def main() -> int:
