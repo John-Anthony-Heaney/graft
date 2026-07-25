@@ -164,8 +164,12 @@ def grads(params, X, y):
 
 
 def fit(X, y, hidden=(64, 64, 64), steps=3000, batch=1024, lr=3e-3,
-        snaps=(0, 20, 100, 400, 1200, 3000), seed=0, patience=0, tol=.01):
+        snaps=(0, 20, 100, 400, 1200, 3000), seed=0, patience=0, tol=.01,
+        decay=False):
     """Train, and keep a copy of the weights at each snapshot step.
+
+    decay : shrink the learning rate to zero on a cosine, instead of holding
+            it constant.
 
     patience : if set, stop early once the mean loss over the last `patience`
                steps is less than `tol` better than the window before it --
@@ -176,8 +180,9 @@ def fit(X, y, hidden=(64, 64, 64), steps=3000, batch=1024, lr=3e-3,
     v = [[np.zeros_like(w) for w in layer] for layer in params]
     rng = np.random.default_rng(seed)
 
+    snaps = {min(s, steps) for s in snaps}            # a snapshot past the end is the end
     kept, losses = [], []
-    for t in range(max(snaps) + 1):
+    for t in range(steps + 1):                        # `steps` decides the length, NOT snaps
         if t in snaps:
             kept.append((t, [[w.copy() for w in layer] for layer in params]))
 
@@ -185,13 +190,17 @@ def fit(X, y, hidden=(64, 64, 64), steps=3000, batch=1024, lr=3e-3,
         g, mse = grads(params, X[idx], y[idx])
         losses.append(mse)
 
+        # a constant step size leaves the weights rattling; shrinking it lets
+        # them settle. this one line is the whole of experiment #2.
+        step_lr = lr * .5 * (1 + np.cos(np.pi * t / steps)) if decay else lr
+
         for i, layer in enumerate(params):             # Adam, by hand
             for j in range(2):
                 m[i][j] = .9 * m[i][j] + .1 * g[i][j]
                 v[i][j] = .999 * v[i][j] + .001 * g[i][j] ** 2
                 mh = m[i][j] / (1 - .9 ** (t + 1))
                 vh = v[i][j] / (1 - .999 ** (t + 1))
-                layer[j] -= lr * mh / (np.sqrt(vh) + 1e-8)
+                layer[j] -= step_lr * mh / (np.sqrt(vh) + 1e-8)
 
         if patience and t > 2 * patience and t % patience == 0:
             recent = np.mean(losses[-patience:])
@@ -222,6 +231,117 @@ def learn_image(size=128, hidden=(128, 128, 128), steps=12000, seed=0, frames=7,
 
     global LAST_RUN                                   # so loss_chart() can draw the
     LAST_RUN = (losses, snaps)                        # same run without retraining
+
+
+def decay_test(size=128, hidden=(128, 128, 128), steps=100_000, seed=0):
+    """Experiment #2: is the t^-1/2 floor gradient noise, or the model's limit?
+
+    Two identical runs. One holds the learning rate constant, one decays it to
+    zero. If the floor is noise, the decayed run drops below the power law.
+    """
+    img = ship(size)
+    X, y = pixels(img)
+    snaps = (0, steps)
+    out = {}
+
+    for name, dec in [("constant lr", False), ("decayed lr", True)]:
+        kept, losses = fit(X, y, hidden, steps, snaps=snaps, seed=seed, decay=dec)
+        out[name] = (losses, predict(kept[-1][1], X).reshape(size, size))
+
+    fig, axes = plt.subplots(1, 3, figsize=(14.5, 4.4))
+
+    w = 500
+
+    def smooth(losses):                               # length follows the data, not `steps`
+        s = np.convolve(losses, np.ones(w) / w, "valid")
+        return np.arange(len(s)) + w, s
+
+    for name, colour in [("constant lr", "#7aa6d8"), ("decayed lr", "#c1440e")]:
+        axes[0].plot(*smooth(out[name][0]), color=colour, lw=2, label=name)
+
+    t, ref = smooth(out["constant lr"][0])
+    m = t > 1000
+    p = np.polyfit(np.log10(t[m]), np.log10(ref[m]), 1)          # the power law it followed
+    axes[0].plot(t[m], 10 ** np.polyval(p, np.log10(t[m])), color="#999", lw=1.2, ls="--",
+                 label=f"$t^{{{p[0]:.2f}}}$")
+    axes[0].set(xscale="log", yscale="log", xlabel="step", ylabel="mean squared error",
+                title="does the line bend?")
+    axes[0].grid(alpha=.25, which="both"); axes[0].legend()
+
+    for ax, name in zip(axes[1:], out):
+        final = np.mean(out[name][0][-500:])
+        show_image(out[name][1], ax=ax, title=f"{name}\nloss {final:.5f}")
+
+    plt.show()
+    print(f"constant {np.mean(out['constant lr'][0][-500:]):.5f}   "
+          f"decayed {np.mean(out['decayed lr'][0][-500:]):.5f}")
+
+
+def n_params(sizes):
+    return sum(a * b + b for a, b in zip(sizes, sizes[1:]))
+
+
+def arch_sweep(depths=(1, 2, 3, 4, 5), widths=(32, 64, 128, 256), steps=10_000,
+               size=128, seed=0, verbose=True):
+    """Every depth x width combination, same data, same steps, same seed.
+
+    Returns {(depth, width): losses}. Only the input SHAPE of the network
+    changes -- everything else is held fixed, so differences are the network's.
+    """
+    import time
+
+    img = ship(size)
+    X, y = pixels(img)
+    runs = {}
+
+    for width in widths:
+        for depth in depths:
+            hidden = (width,) * depth
+            t0 = time.time()
+            _, losses = fit(X, y, hidden, steps, snaps=(0,), seed=seed)
+            runs[(depth, width)] = np.array(losses)
+            if verbose:
+                p = n_params([2, *hidden, 1])
+                print(f"{depth}x{width:<4} {p:>8,} params  "
+                      f"final {np.mean(losses[-500:]):.5f}  ({time.time() - t0:.0f}s)",
+                      flush=True)
+
+    return runs
+
+
+def show_sweep(runs, window=200):
+    """One panel per width, one line per depth, plus the final losses as a grid."""
+    depths = sorted({d for d, _ in runs})
+    widths = sorted({w for _, w in runs})
+    shades = plt.cm.viridis(np.linspace(.1, .85, len(depths)))
+
+    fig, axes = plt.subplots(1, len(widths) + 1, figsize=(3.6 * (len(widths) + 1), 3.8))
+    lo = min(np.mean(v[-500:]) for v in runs.values()) * .8
+    hi = max(np.convolve(v, np.ones(window) / window, "valid")[0] for v in runs.values())
+
+    for ax, width in zip(axes, widths):
+        for colour, depth in zip(shades, depths):
+            s = np.convolve(runs[(depth, width)], np.ones(window) / window, "valid")
+            ax.plot(np.arange(len(s)) + window, s, color=colour, lw=1.8,
+                    label=f"{depth} layer" + ("s" if depth > 1 else ""))
+        ax.set(xscale="log", yscale="log", ylim=(lo, hi), xlabel="step",
+               title=f"width {width}")
+        ax.grid(alpha=.2, which="both")
+    axes[0].set_ylabel("mean squared error")
+    axes[0].legend(fontsize=8)
+
+    grid = np.array([[np.mean(runs[(d, w)][-500:]) for w in widths] for d in depths])
+    ax = axes[-1]
+    im = ax.imshow(grid, cmap="viridis_r", norm="log")
+    ax.set(xticks=range(len(widths)), xticklabels=widths, xlabel="width",
+           yticks=range(len(depths)), yticklabels=depths, ylabel="hidden layers",
+           title="final loss")
+    for i in range(len(depths)):
+        for j in range(len(widths)):
+            ax.text(j, i, f"{grid[i, j]*1000:.1f}", ha="center", va="center",
+                    fontsize=9, color="white" if grid[i, j] > grid.mean() else "black")
+    fig.colorbar(im, ax=ax, fraction=.046)
+    plt.show()
 
 
 LAST_RUN = None                                       # (losses, snaps) of the last fit
