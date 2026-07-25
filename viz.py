@@ -275,6 +275,37 @@ def learn(want=AND, name="AND", every=2, **kw):
     plt.show()
 
 
+def xor_net_diagram():
+    """2 inputs -> 2 hidden neurons -> 1 output. The smallest thing that does XOR."""
+    fig, ax = plt.subplots(figsize=(11.5, 5))
+    ax.set(xlim=(0, 13.6), ylim=(0, 6)); ax.axis("off")
+
+    xs = [(1.1, 4.2), (1.1, 1.8)]                     # inputs
+    hid = [(5.2, 4.4), (5.2, 1.6)]                    # the two lines
+    out = (9.9, 3.0)                                  # the combiner
+
+    for xy, lab in zip(xs, ("$x_1$", "$x_2$")):
+        _node(ax, xy, lab)
+
+    for h in hid:                                     # every input feeds every hidden neuron
+        for xy in xs:
+            _wire(ax, (xy[0] + .48, xy[1]), (h[0] - .95, h[1]))
+
+    _neuron(ax, hid[0], "$h_1$   fires if  $x_1$ OR $x_2$", w=1.9, h=1.6)
+    _neuron(ax, hid[1], "$h_2$   fires if  $x_1$ AND $x_2$", w=1.9, h=1.6)
+
+    _wire(ax, (hid[0][0] + .95, hid[0][1]), (out[0] - .95, out[1] + .3), "$+1$")
+    _wire(ax, (hid[1][0] + .95, hid[1][1]), (out[0] - .95, out[1] - .3), "$-1$", t=.45)
+
+    _neuron(ax, out, "$h_1$ AND NOT $h_2$", w=1.9, h=1.6)
+    _wire(ax, (out[0] + .95, out[1]), (12.4, out[1]))
+    ax.text(12.9, out[1], "$y$", fontsize=15, ha="center", va="center")
+
+    ax.text(5.2, 5.75, "layer 1 draws two lines", ha="center", color=INK, fontsize=12)
+    ax.text(10.6, 5.75, "layer 2 combines them", ha="center", color=INK, fontsize=12)
+    plt.show()
+
+
 def no_line(want=XOR, n=41):
     """Search every line. Show the best each corner-failure can manage.
 
