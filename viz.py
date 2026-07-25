@@ -159,35 +159,28 @@ def video(want=AND, name="AND", fps=1.5, dpi=90, hold=5, **kw):
     return HTML(f'<img src="data:image/gif;base64,{src}">')
 
 
-def learn(want=AND, name="AND", **kw):
+def learn(want=AND, name="AND", every=2, **kw):
     """Watch the line move, epoch by epoch, until it stops being wrong."""
     hist = train(want, **kw)
-    n, per_row = len(hist), 4
-    rows = -(-n // per_row)                           # ceil
+    keep = list(range(0, len(hist) - 1, every)) + [len(hist) - 1]   # every other, always the last
+    per_row = min(5, len(keep))
+    rows = -(-len(keep) // per_row)                   # ceil
 
-    fig = plt.figure(figsize=(3.1 * per_row, 3.5 * rows + 2.6))
-    gs = fig.add_gridspec(rows + 1, per_row, height_ratios=[3] * rows + [2], hspace=.45)
+    fig, axes = plt.subplots(rows, per_row, figsize=(3.1 * per_row, 3.6 * rows),
+                             squeeze=False)
+    for ax in axes.flat:
+        ax.axis("off")                                # blank any unused slot
 
-    for i, h in enumerate(hist):
-        ax = fig.add_subplot(gs[i // per_row, i % per_row])
+    for slot, i in enumerate(keep):
+        h = hist[i]
+        ax = axes.flat[slot]
+        ax.axis("on")
         show(h["w"], h["b"], want=want, ax=ax,
              title=f"epoch {i}   {h['wrong']} wrong" + ("   ✓" if not h["wrong"] else ""))
         ax.set_xlabel(f"w = [{h['w'][0]:+.1f}, {h['w'][1]:+.1f}]   b = {h['b']:+.1f}",
                       fontsize=9)
 
-    ax = fig.add_subplot(gs[rows, :])                 # the same story as numbers
-    e = range(n)
-    for key, lab, c in [(0, "$w_1$", "#1f4e8c"), (1, "$w_2$", "#7aa6d8")]:
-        ax.plot(e, [h["w"][key] for h in hist], "o-", color=c, label=lab)
-    ax.plot(e, [h["b"] for h in hist], "o-", color="#c1440e", label="$b$")
-    ax.bar(e, [h["wrong"] for h in hist], width=.5, color="#eee", zorder=0,
-           label="corners wrong")
-    ax.axhline(0, color="#999", lw=.8, zorder=0)
-    ax.axvline(n - 1, color="#2a9d3f", lw=2, ls="--", zorder=1)
-    ax.annotate(" converged", (n - 1, ax.get_ylim()[0]), color="#2a9d3f",
-                ha="left", va="bottom", fontsize=10, weight="bold")
-    ax.set(xlabel="epoch", xticks=list(e), title=f"learning {name}")
-    ax.legend(loc="upper right", ncol=4, fontsize=9)
+    fig.suptitle(f"learning {name}")
     plt.show()
 
 
