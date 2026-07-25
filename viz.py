@@ -24,6 +24,51 @@ def perceptron(x, w, b):
     return step(z)
 
 
+def diagram(labels=("$x_1$", "$x_2$"), weights=("$w_1$", "$w_2$")):
+    """The anatomy of one neuron: inputs in, weighted sum, threshold, out."""
+    from matplotlib.patches import Circle, FancyArrowPatch, FancyBboxPatch
+
+    fig, ax = plt.subplots(figsize=(8.5, 4))
+    ax.set(xlim=(0, 10), ylim=(0, 5)); ax.axis("off")
+
+    ink, accent = "#1f4e8c", "#c1440e"
+    ys = [3.6, 2.0]                                   # one row per input
+    body = (5.0, 2.8)                                 # where the neuron sits
+
+    for y, lab in zip(ys, labels):                    # the inputs
+        ax.add_patch(Circle((1.2, y), .42, fc="white", ec=ink, lw=2, zorder=3))
+        ax.text(1.2, y, lab, ha="center", va="center", fontsize=13, zorder=4)
+
+    ax.add_patch(Circle((1.2, .6), .42, fc="#f2f2f2", ec="#999", lw=2, zorder=3))
+    ax.text(1.2, .6, "1", ha="center", va="center", fontsize=13, color="#666", zorder=4)
+
+    # every input reaches the neuron, carrying its weight
+    arrive = [body[1] + .5, body[1], body[1] - .5]    # distinct landing points, so nothing overlaps
+    for y, wl, ay in zip(ys + [.6], list(weights) + ["$b$"], arrive):
+        ax.add_patch(FancyArrowPatch((1.68, y), (body[0] - 1.15, ay),
+                                     arrowstyle="-|>", mutation_scale=16,
+                                     color=ink if y in ys else "#999", lw=1.8))
+        t = .58                                       # label sits along its own arrow
+        ax.text(1.68 + t * (body[0] - 1.15 - 1.68), y + t * (ay - y) + .2, wl,
+                fontsize=13, color=accent, ha="center", va="bottom")
+
+    ax.add_patch(FancyBboxPatch((body[0] - 1.1, body[1] - .95), 2.2, 1.9,
+                                boxstyle="round,pad=.06", fc="#e8eef7", ec=ink, lw=2))
+    ax.plot([body[0] - .02, body[0] - .02], [body[1] - .85, body[1] + .85],
+            color=ink, lw=1.2, ls=":")                # sum | threshold
+    ax.text(body[0] - .55, body[1], r"$\sum$", ha="center", va="center", fontsize=26)
+
+    sx = np.linspace(-1, 1, 200)                      # the step, drawn to scale
+    ax.plot(body[0] + .55 + sx * .38, body[1] - .45 + (sx > 0) * .9, color=accent, lw=2.2)
+
+    ax.add_patch(FancyArrowPatch((body[0] + 1.15, body[1]), (8.6, body[1]),
+                                 arrowstyle="-|>", mutation_scale=16, color=ink, lw=1.8))
+    ax.text(9.1, body[1], "$y$", fontsize=15, ha="center", va="center")
+    ax.text(body[0], body[1] - 1.35, r"$z = w_1x_1 + w_2x_2 + b$",
+            ha="center", fontsize=12, color=ink)
+    plt.show()
+
+
 def show(w, b, want=None, title="", ax=None):
     """Draw what the neuron does to every point in the plane.
 
