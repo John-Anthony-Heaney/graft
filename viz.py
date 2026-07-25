@@ -91,6 +91,63 @@ def train(want=AND, w=(-0.8, 0.6), b=0.9, lr=0.2, max_epochs=12):
     return history
 
 
+def trace(want=AND, w=(-0.8, 0.6), b=0.9, lr=0.2, max_epochs=12):
+    """Same rule as train(), but one frame per individual correction."""
+    w, b = list(w), b
+    frames = []
+
+    for epoch in range(max_epochs):
+        wrong = sum(perceptron(x, w, b) != t for x, t in zip(CORNERS, want))
+        if wrong == 0:
+            frames.append({"w": list(w), "b": b, "epoch": epoch, "focus": None,
+                           "error": 0, "wrong": 0})
+            break
+
+        for i, (x, target) in enumerate(zip(CORNERS, want)):
+            error = target - perceptron(x, w, b)
+            # the state the neuron is in WHILE looking at this corner
+            frames.append({"w": list(w), "b": b, "epoch": epoch, "focus": i,
+                           "error": error, "wrong": wrong})
+            for j in range(len(w)):
+                w[j] += lr * error * x[j]
+            b += lr * error
+
+    return frames
+
+
+def video(want=AND, name="AND", fps=1.6, **kw):
+    """The line moving, one correction at a time."""
+    from matplotlib import animation
+
+    frames = trace(want, **kw)
+    fig, ax = plt.subplots(figsize=(5.2, 5.4))
+    plt.close(fig)                                    # don't also emit a static copy
+
+    def draw(k):
+        f = frames[k]
+        ax.clear()
+        show(f["w"], f["b"], want=want, ax=ax)
+
+        if f["focus"] is None:
+            ax.set_title(f"epoch {f['epoch']}  —  converged ✓", color="#2a9d3f")
+        else:
+            x = CORNERS[f["focus"]]
+            hit = f["error"] == 0
+            ax.scatter(*x, s=760, facecolor="none", zorder=6, linewidth=2.5,
+                       edgecolor="#2a9d3f" if hit else "#c1440e")   # who's being judged
+            verdict = "correct — change nothing" if hit else (
+                "should have fired" if f["error"] > 0 else "should not have fired")
+            ax.set_title(f"epoch {f['epoch']}   looking at {x}\n{verdict}",
+                         color="#2a9d3f" if hit else "#c1440e", fontsize=11)
+
+        ax.set_xlabel(f"w = [{f['w'][0]:+.1f}, {f['w'][1]:+.1f}]   b = {f['b']:+.1f}")
+
+    from IPython.display import HTML
+
+    anim = animation.FuncAnimation(fig, draw, frames=len(frames), interval=1000 / fps)
+    return HTML(anim.to_html5_video(embed_limit=64))   # renders as a <video> with controls
+
+
 def learn(want=AND, name="AND", **kw):
     """Watch the line move, epoch by epoch, until it stops being wrong."""
     hist = train(want, **kw)
