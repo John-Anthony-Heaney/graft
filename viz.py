@@ -37,8 +37,12 @@ def _node(ax, xy, label, grey=False):
             color="#666" if grey else "black")
 
 
-def _neuron(ax, xy, caption=None, w=2.2, h=1.9):
-    """The neuron itself: a sum on the left, a threshold on the right."""
+def _neuron(ax, xy, caption=None, w=2.2, h=1.9, smooth=False):
+    """The neuron itself: a sum on the left, an activation on the right.
+
+    smooth : draw a sigmoid instead of a step. Matters for backprop, where a
+             step is useless -- flat everywhere means no slope to follow.
+    """
     from matplotlib.patches import FancyBboxPatch
 
     cx, cy = xy
@@ -47,8 +51,9 @@ def _neuron(ax, xy, caption=None, w=2.2, h=1.9):
     ax.plot([cx, cx], [cy - h / 2 + .1, cy + h / 2 - .1], color=INK, lw=1.2, ls=":")
     ax.text(cx - w / 4, cy, r"$\sum$", ha="center", va="center", fontsize=24)
 
-    sx = np.linspace(-1, 1, 200)                      # the step, drawn to scale
-    ax.plot(cx + w / 4 + sx * .34, cy - .42 + (sx > 0) * .84, color=ACCENT, lw=2.2)
+    sx = np.linspace(-1, 1, 200)                      # the activation, drawn to scale
+    curve = 1 / (1 + np.exp(-6 * sx)) if smooth else (sx > 0).astype(float)
+    ax.plot(cx + w / 4 + sx * .34, cy - .42 + curve * .84, color=ACCENT, lw=2.2)
     if caption:
         ax.text(cx, cy - h / 2 - .38, caption, ha="center", fontsize=12, color=INK)
 
@@ -303,6 +308,53 @@ def xor_net_diagram():
 
     ax.text(5.2, 5.75, "layer 1 draws two lines", ha="center", color=INK, fontsize=12)
     ax.text(10.6, 5.75, "layer 2 combines them", ha="center", color=INK, fontsize=12)
+    plt.show()
+
+
+def backprop_diagram():
+    """Two passes over the same wires: values forward, blame backward."""
+    from matplotlib.patches import FancyArrowPatch, FancyBboxPatch
+
+    fig, ax = plt.subplots(figsize=(12, 5.6))
+    ax.set(xlim=(0, 13.6), ylim=(-.7, 6.6)); ax.axis("off")
+
+    xs = [(1.1, 4.6), (1.1, 2.2)]
+    hid = [(5.2, 4.8), (5.2, 2.0)]
+    out = (9.9, 3.4)
+
+    def back(a, b, label, dy=.34):                    # blame travelling the other way
+        ax.add_patch(FancyArrowPatch(a, b, arrowstyle="-|>", mutation_scale=15,
+                                     color=ACCENT, lw=1.8, ls="--",
+                                     connectionstyle="arc3,rad=-.22"))
+        ax.text((a[0] + b[0]) / 2, (a[1] + b[1]) / 2 - dy, label,
+                color=ACCENT, fontsize=13, ha="center", va="top")
+
+    for xy, lab in zip(xs, ("$x_1$", "$x_2$")):
+        _node(ax, xy, lab)
+    for h in hid:
+        for xy in xs:
+            _wire(ax, (xy[0] + .48, xy[1]), (h[0] - .95, h[1]))
+
+    _neuron(ax, hid[0], "$h_1$", w=1.9, h=1.6, smooth=True)
+    _neuron(ax, hid[1], "$h_2$", w=1.9, h=1.6, smooth=True)
+    _wire(ax, (hid[0][0] + .95, hid[0][1]), (out[0] - .95, out[1] + .3))
+    _wire(ax, (hid[1][0] + .95, hid[1][1]), (out[0] - .95, out[1] - .3))
+    _neuron(ax, out, "$y$", w=1.9, h=1.6, smooth=True)
+    _wire(ax, (out[0] + .95, out[1]), (11.9, out[1]))
+
+    ax.add_patch(FancyBboxPatch((11.95, out[1] - .55), 1.5, 1.1,
+                                boxstyle="round,pad=.06", fc="#fdece4", ec=ACCENT, lw=2))
+    ax.text(12.7, out[1], "loss", ha="center", va="center", color=ACCENT, fontsize=13)
+
+    # ---- the backward pass: how wrong the answer was, spread back over the wires
+    back((12.0, out[1] - .75), (out[0] + .95, out[1] - .75), r"$\delta_y$")
+    back((out[0] - .95, out[1] - .95), (hid[0][0] + .95, hid[0][1] - .95), r"$\delta_y v_1$")
+    back((out[0] - .95, out[1] - 1.4), (hid[1][0] + .95, hid[1][1] - .8), r"$\delta_y v_2$")
+
+    ax.text(6.8, 6.25, "forward: values", color=INK, fontsize=13, ha="center")
+    ax.text(6.8, .1, "backward: blame", color=ACCENT, fontsize=13, ha="center")
+    ax.text(6.8, -.42, r"each weight's share $=\ \delta \times$ the input it carried",
+            color=ACCENT, fontsize=11.5, ha="center")
     plt.show()
 
 
