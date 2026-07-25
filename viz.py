@@ -164,8 +164,13 @@ def grads(params, X, y):
 
 
 def fit(X, y, hidden=(64, 64, 64), steps=3000, batch=1024, lr=3e-3,
-        snaps=(0, 20, 100, 400, 1200, 3000), seed=0):
-    """Train, and keep a copy of the weights at each snapshot step."""
+        snaps=(0, 20, 100, 400, 1200, 3000), seed=0, patience=0, tol=.01):
+    """Train, and keep a copy of the weights at each snapshot step.
+
+    patience : if set, stop early once the mean loss over the last `patience`
+               steps is less than `tol` better than the window before it --
+               i.e. it has stopped meaningfully improving.
+    """
     params = init([X.shape[1], *hidden, 1], seed)
     m = [[np.zeros_like(w) for w in layer] for layer in params]   # Adam state
     v = [[np.zeros_like(w) for w in layer] for layer in params]
@@ -187,6 +192,13 @@ def fit(X, y, hidden=(64, 64, 64), steps=3000, batch=1024, lr=3e-3,
                 mh = m[i][j] / (1 - .9 ** (t + 1))
                 vh = v[i][j] / (1 - .999 ** (t + 1))
                 layer[j] -= lr * mh / (np.sqrt(vh) + 1e-8)
+
+        if patience and t > 2 * patience and t % patience == 0:
+            recent = np.mean(losses[-patience:])
+            before = np.mean(losses[-2 * patience:-patience])
+            if (before - recent) / before < tol:      # gained less than tol -- done
+                kept.append((t, [[w.copy() for w in layer] for layer in params]))
+                break
 
     return kept, losses
 
