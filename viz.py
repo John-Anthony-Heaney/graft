@@ -973,3 +973,202 @@ def show_funnel_sweep(runs, window=200):
 
     plt.tight_layout()
     plt.show()
+
+def lr_find(X, y, hidden=(36,) * 7, batch=1024, min_lr=1e-6, max_lr=10.0, steps=300, seed=0, plot=True):
+    """Exponentially sweeps learning rate across steps to find the optimal lr.
+
+    Returns:
+        lrs : list of learning rates used per step
+        losses : list of raw losses per step
+        best_lr : suggested learning rate (rate where loss dropped fastest)
+    """
+    params = init([X.shape[1], *hidden, 1], seed)
+    m = [[np.zeros_like(w) for w in layer] for layer in params]
+    v = [[np.zeros_like(w) for w in layer] for layer in params]
+    rng = np.random.default_rng(seed)
+
+    # Exponential scale factor per step
+    gamma = (max_lr / min_lr) ** (1 / steps)
+    lr = min_lr
+
+    lrs, losses = [], []
+    smoothed_loss = None
+    best_loss = float("inf")
+
+    for t in range(steps):
+        idx = rng.integers(0, len(X), batch)
+        g, mse = grads(params, X[idx], y[idx])
+
+        # Smooth loss to prevent micro-noise spikes from distorting the curve
+        smoothed_loss = mse if smoothed_loss is None else 0.9 * smoothed_loss + 0.1 * mse
+        
+        # Stop early if loss explodes to NaN or 4x the minimum seen so far
+        if np.isnan(smoothed_loss) or smoothed_loss > 4 * best_loss:
+            break
+            
+        if smoothed_loss < best_loss:
+            best_loss = smoothed_loss
+
+        lrs.append(lr)
+        losses.append(smoothed_loss)
+
+        # Standard Adam step using current iteration's learning rate
+        for i, layer in enumerate(params):
+            for j in range(2):
+                m[i][j] = 0.9 * m[i][j] + 0.1 * g[i][j]
+                v[i][j] = 0.999 * v[i][j] + 0.001 * g[i][j] ** 2
+                mh = m[i][j] / (1 - 0.9 ** (t + 1))
+                vh = v[i][j] / (1 - 0.999 ** (t + 1))
+                layer[j] -= lr * mh / (np.sqrt(vh) + 1e-8)
+
+        lr *= gamma
+
+    # Find the steepest negative gradient (where loss dropped fastest)
+    log_lrs = np.log10(lrs)
+    loss_grad = np.gradient(losses, log_lrs)
+    best_idx = np.argmin(loss_grad)
+    best_lr = lrs[best_idx]
+
+    if plot:
+        fig, ax = plt.subplots(figsize=(7, 3.8))
+        ax.plot(lrs, losses, color=INK, lw=2)
+        ax.axvline(best_lr, color=ACCENT, ls="--", label=f"suggested lr: {best_lr:.2e}")
+        ax.set(xscale="log", yscale="log", xlabel="learning rate", ylabel="mean squared error",
+               title="learning rate finder")
+        ax.grid(alpha=0.25, which="both")
+        ax.legend()
+        plt.show()
+
+    return lrs, losses, best_lr
+
+def lr_find(X, y, hidden=(36,) * 7, batch=1024, min_lr=1e-6, max_lr=10.0, steps=250, seed=0, plot=True):
+    """Exponentially sweeps learning rate to find the optimal rate for a given batch size."""
+    params = init([X.shape[1], *hidden, 1], seed)
+    m = [[np.zeros_like(w) for w in layer] for layer in params]
+    v = [[np.zeros_like(w) for w in layer] for layer in params]
+    rng = np.random.default_rng(seed)
+
+    gamma = (max_lr / min_lr) ** (1 / steps)
+    lr = min_lr
+
+    lrs, raw_losses = [], []
+    smoothed_losses = []
+    smoothed = None
+    best_loss = float("inf")
+
+    for t in range(steps):
+        idx = rng.integers(0, len(X), batch)
+        g, mse = grads(params, X[idx], y[idx])
+
+        # 1. Exponential Smoothing (beta = 0.98)
+        smoothed = mse if smoothed is None else 0.98 * smoothed + 0.02 * mse
+        
+        # Stop early if loss explodes or hits NaN
+        if np.isnan(smoothed) or smoothed > 4 * best_loss:
+            break
+        if smoothed < best_loss:
+            best_loss = smoothed
+
+        lrs.append(lr)
+        raw_losses.append(mse)
+        smoothed_losses.append(smoothed)
+
+        for i, layer in enumerate(params):
+            for j in range(2):
+                m[i][j] = .9 * m[i][j] + .1 * g[i][j]
+                v[i][j] = .999 * v[i][j] + .001 * g[i][j] ** 2
+                mh = m[i][j] / (1 - .9 ** (t + 1))
+                vh = v[i][j] / (1 - .999 ** (t + 1))
+                layer[j] -= lr * mh / (np.sqrt(vh) + 1e-8)
+
+        lr *= gamma
+
+    # 2. Find the minimum of the smoothed loss curve, then back off by 5x safety factor
+    min_idx = np.argmin(smoothed_losses)
+    # Pick a learning rate safely before the loss hit its minimum / diverged
+    safe_idx = max(0, min_idx - int(steps * 0.15))
+    best_lr = lrs[safe_idx]
+
+    if plot:
+        fig, ax = plt.subplots(figsize=(6.5, 3.5))
+        ax.plot(lrs, smoothed_losses, color=INK, lw=2, label="smoothed loss")
+        ax.axvline(best_lr, color=ACCENT, ls="--", label=f"chosen lr: {best_lr:.2e}")
+        ax.set(xscale="log", yscale="log", xlabel="learning rate", ylabel="mean squared error",
+               title=f"learning rate finder (batch size {batch:,})")
+        ax.grid(alpha=.25, which="both"); ax.legend()
+        plt.show()
+
+    return best_lr
+
+
+def batch_lr_sweep(batches=(64, 256, 1024, 4096, 16384), hidden=(36,) * 7,
+                   base_steps=10_000, base_batch=1024, size=128, seed=0, verbose=True):
+    """Runs each batch size with its own custom lr_find() pass and scaled steps.
+
+    Steps per batch size are calculated as: (base_steps / batch) * base_batch
+    so every batch size sees the exact same total sample budget.
+    """
+    import time
+
+    img = ship(size)
+    X, y = pixels(img)
+    runs = {}
+
+    for batch in batches:
+        t0 = time.time()
+
+        # 1. Find optimal learning rate SPECIFIC to this batch size
+        best_lr = lr_find(X, y, hidden=hidden, batch=batch, seed=seed, plot=False)
+
+        # 2. Scale steps to maintain constant sample exposure: (10000 / batch) * base_batch
+        steps = int((base_steps / batch) * base_batch)
+
+        # 3. Fit model using the custom LR and dynamically scaled step count
+        _, losses = fit(X, y, hidden, steps=steps, batch=batch, lr=best_lr, snaps=(0,), seed=seed)
+        secs = time.time() - t0
+
+        runs[batch] = (np.array(losses), secs, best_lr)
+        if verbose:
+            print(f"batch {batch:>6,}  lr {best_lr:.2e}  steps {steps:>6,}  "
+                  f"final {np.mean(losses[-500:]):.5f}  ({secs:>4.0f}s)", flush=True)
+
+    return runs
+
+
+def show_batch_lr_sweep(runs, window=200):
+    """Plots batch runs with custom LRs across steps, samples, and wall-clock time.
+
+    Uses a high-contrast palette and distinct line styles for readability.
+    """
+    # High-contrast palette: deep blue, bright orange, teal, vibrant purple, dark grey
+    distinct_colors = ["#1f4e8c", "#c1440e", "#008080", "#8a2be2", "#333333"]
+    line_styles = ["-", "--", "-.", "-", "--"]  # Varied styles for instant readability
+
+    fig, axes = plt.subplots(1, 3, figsize=(14.5, 4.4))
+
+    sorted_runs = sorted(runs.items())
+
+    for idx, (batch, (losses, secs, lr)) in enumerate(sorted_runs):
+        colour = distinct_colors[idx % len(distinct_colors)]
+        ls = line_styles[idx % len(line_styles)]
+
+        s = np.convolve(losses, np.ones(window) / window, "valid")
+        t = np.arange(len(s)) + window
+        label = f"batch {batch:,} (lr={lr:.1e})"
+
+        axes[0].plot(t, s, color=colour, ls=ls, lw=2.0, label=label)
+        axes[1].plot(t * batch, s, color=colour, ls=ls, lw=2.0)            # samples seen
+        axes[2].plot(t * secs / len(losses), s, color=colour, ls=ls, lw=2.0) # seconds elapsed
+
+    for ax, xlab, title in zip(axes,
+                               ["step", "samples seen", "seconds"],
+                               ["per step: progress vs updates",
+                                "per sample: constant data exposure",
+                                "per second: real time efficiency"]):
+        ax.set(xscale="log", yscale="log", xlabel=xlab, title=title)
+        ax.grid(alpha=.25, which="both")
+
+    axes[0].set_ylabel("mean squared error")
+    axes[0].legend(fontsize=8, loc="lower left")
+    plt.tight_layout()
+    plt.show()
