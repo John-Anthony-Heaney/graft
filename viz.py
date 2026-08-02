@@ -423,6 +423,55 @@ def show_budget(runs, window=200):
     plt.show()
 
 
+def batch_sweep(batches=(64, 256, 1024, 4096, 16384), hidden=(36,) * 7, steps=10_000,
+                size=128, seed=0, lr=3e-3, verbose=True):
+    """One network, one budget of steps, different minibatch sizes.
+
+    A step with batch 16,384 sees the whole image; a step with batch 64 sees a
+    sixteenth of a percent of it. Those are not comparable units of work, so we
+    record wall-clock too and let the charts compare on three different axes.
+    """
+    import time
+
+    img = ship(size)
+    X, y = pixels(img)
+    runs = {}
+
+    for batch in batches:
+        t0 = time.time()
+        _, losses = fit(X, y, hidden, steps, batch=batch, lr=lr, snaps=(0,), seed=seed)
+        secs = time.time() - t0
+        runs[batch] = (np.array(losses), secs)
+        if verbose:
+            print(f"batch {batch:>6,}  final {np.mean(losses[-500:]):.5f}  "
+                  f"{secs:>6.0f}s  ({steps * batch / 1e6:.1f}M samples seen)", flush=True)
+    return runs
+
+
+def show_batch(runs, window=200):
+    """The same runs on three x-axes: steps, samples, seconds. They disagree."""
+    shades = plt.cm.cool(np.linspace(0, .9, len(runs)))
+    fig, axes = plt.subplots(1, 3, figsize=(14.5, 4.4))
+
+    for colour, (batch, (losses, secs)) in zip(shades, sorted(runs.items())):
+        s = np.convolve(losses, np.ones(window) / window, "valid")
+        t = np.arange(len(s)) + window
+        axes[0].plot(t, s, color=colour, lw=1.8, label=f"batch {batch:,}")
+        axes[1].plot(t * batch, s, color=colour, lw=1.8)          # work done
+        axes[2].plot(t * secs / len(losses), s, color=colour, lw=1.8)   # time spent
+
+    for ax, xlab, title in zip(axes,
+                               ["step", "samples seen", "seconds"],
+                               ["per step: big batches win",
+                                "per sample: small batches win",
+                                "per second: what you actually pay"]):
+        ax.set(xscale="log", yscale="log", xlabel=xlab, title=title)
+        ax.grid(alpha=.2, which="both")
+    axes[0].set_ylabel("mean squared error")
+    axes[0].legend(fontsize=8)
+    plt.show()
+
+
 LAST_RUN = None                                       # (losses, snaps) of the last fit
 
 
@@ -857,4 +906,70 @@ def line_scores(n=61):
     ax.set(xticks=range(5), xlabel="corners correct (out of 4)",
            ylabel="fraction of lines", title=f"every line, scored  ({n**3:,} of them)")
     ax.legend()
+    plt.show()
+
+def funnel_budget_sweep(funnels=None, budget=None, steps=10_000, size=128, seed=0, verbose=True):
+    """Fixed parameter budget, testing different wide-to-narrow (funnel) shapes.
+
+    budget defaults to HALF the pixel count (~8,192 parameters).
+    """
+    import time
+
+    img = ship(size)
+    X, y = pixels(img)
+    budget = size * size // 2 if budget is None else budget
+
+    # Default funnel configurations designed to hit ~8,192 parameters
+    if funnels is None:
+        funnels = [
+            ("uniform-7x36", (36,) * 7),                  # Baseline flat network
+            ("stepped-4x(90-60-30-12)", (90, 60, 30, 12)),  # Gradual 4-layer funnel
+            ("sharp-3x(128-55-16)", (128, 55, 16)),       # Sharp 3-layer front-loaded funnel
+            ("deep-6x(70-50-40-30-20-10)", (70, 50, 40, 30, 20, 10)), # Deep 6-layer funnel
+            ("shallow-1x2048", (2048,)),                 # Extreme 1-layer baseline
+        ]
+
+    runs = {}
+    for name, hidden in funnels:
+        p = n_params([2, *hidden, 1])
+        t0 = time.time()
+        _, losses = fit(X, y, hidden, steps, snaps=(0,), seed=seed)
+        runs[name] = (np.array(losses), p, len(hidden))
+        if verbose:
+            print(f"{name:<28} {p:>7,} params ({p/budget:.3f} of budget)  "
+                  f"final {np.mean(losses[-500:]):.5f}  ({time.time()-t0:.0f}s)", flush=True)
+    return runs
+
+
+def show_funnel_sweep(runs, window=200):
+    """Plot loss curves and final loss comparisons for funnel architectures."""
+    shades = plt.cm.plasma(np.linspace(0.05, 0.85, len(runs)))
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.6))
+
+    names = list(runs.keys())
+    final_losses = []
+
+    for colour, (name, (losses, p, d)) in zip(shades, runs.items()):
+        s = np.convolve(losses, np.ones(window) / window, "valid")
+        axes[0].plot(np.arange(len(s)) + window, s, color=colour, lw=1.8, label=f"{name} ({p:,} p)")
+        final_losses.append(np.mean(losses[-500:]))
+
+    axes[0].set(xscale="log", yscale="log", xlabel="step", ylabel="mean squared error",
+                title="Funnel Shapes at ~8,192 Parameters")
+    axes[0].grid(alpha=.2, which="both")
+    axes[0].legend(fontsize=8, loc="upper right")
+
+    y_pos = np.arange(len(names))
+    axes[1].barh(y_pos, final_losses, color=shades, edgecolor="none", height=0.6)
+    axes[1].set_yticks(y_pos)
+    axes[1].set_yticklabels(names, fontsize=9)
+    axes[1].invert_yaxis()  # top-down ranking
+    axes[1].set(xscale="log", xlabel="final loss (MSE)", title="Final Loss Comparison")
+    axes[1].grid(alpha=.2, which="both")
+
+    for i, loss in enumerate(final_losses):
+        axes[1].text(loss * 1.05, i, f"{loss:.5f}", va="center", fontsize=8)
+
+    plt.tight_layout()
     plt.show()
